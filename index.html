@@ -166,7 +166,9 @@ body.pin-lock{overflow:hidden}
   const f=o.querySelector('form'),i=f.querySelector('input'),er=f.querySelector('p:nth-of-type(2)'),bt=f.querySelector('button');
   setTimeout(()=>i.focus(),50);
   f.onsubmit=async ev=>{
-    ev.preventDefault();const v=i.value.trim();if(!v)return;er.textContent='Verificando…';bt.disabled=true;
+    ev.preventDefault();const v=i.value.trim();if(!v)return;
+    if(location.protocol==='file:'){er.textContent='Abra pelo endereço do site (https://…), não pelo arquivo do computador.';return}
+    er.textContent='Verificando…';bt.disabled=true;
     try{
       const r=await check(v);
       const j=await r.json().catch(()=>null);
@@ -957,7 +959,9 @@ function paneFerr(){
   <div class="card"><h2>Aviso na tela inicial</h2><textarea id="av" rows="3" placeholder="Ex.: Reunião geral sexta, 9h. Traga o crachá.">${esc(C.aviso)}</textarea><div style="margin-top:10px"><button class="btn p" id="avs">Salvar aviso</button></div></div>
   <div class="card"><h2>Preferências</h2>
     <label style="margin-top:0">Bloqueio automático do perfil do funcionário (volta à tela inicial)</label>
-    <select id="lk">${[[0,'Desligado'],[30,'30 segundos'],[60,'1 minuto'],[120,'2 minutos'],[300,'5 minutos']].map(([v,n])=>`<option value="${v}" ${+C.lock===v?'selected':''}>${n}</option>`).join('')}</select>
+    ${(()=>{const P=[[0,'Desligado'],[15,'15 segundos'],[30,'30 segundos'],[60,'1 minuto'],[120,'2 minutos'],[300,'5 minutos'],[600,'10 minutos']];const cu=!P.some(([v])=>v===+C.lock);
+      return `<select id="lk">${P.map(([v,n])=>`<option value="${v}" ${!cu&&+C.lock===v?'selected':''}>${n}</option>`).join('')}<option value="x" ${cu?'selected':''}>Outro tempo…</option></select>
+      <div id="lkw" style="${cu?'':'display:none'};margin-top:8px"><label style="margin-top:0">Tempo em segundos (de 5 a 3600)</label><input id="lkc" type="number" min="5" max="3600" step="1" inputmode="numeric" value="${cu?+C.lock:45}"></div>`})()}
     <label class="chk"><input type="checkbox" id="dp" ${C.dup?'checked':''}> Perguntar antes de registrar ponto repetido (menos de 2 min)</label>
     <label class="chk"><input type="checkbox" id="dk" ${C.dark?'checked':''}> Modo escuro</label>
     <div style="margin-top:12px"><button class="btn p" id="prs">Salvar preferências</button></div>
@@ -969,7 +973,11 @@ function paneFerr(){
     ${man.length?`<div class="wrap"><table><tr><th>Funcionário</th><th>Data</th><th>Hora</th></tr>${man.slice(0,50).map(({e,r})=>`<tr><td>${esc(e.name)}</td><td>${new Date(r.ts).toLocaleDateString('pt-BR')}</td><td>${hhmm(new Date(r.ts))}</td></tr>`).join('')}</table></div>`:'<small style="color:var(--mut)">Nenhuma marcação manual.</small>'}
     <p style="color:var(--mut);font-size:13px;margin-top:8px">Auditoria: horários digitados pelo administrador em “✍ Lançar ponto” (últimos 50).</p></div>`;
   $('#avs').onclick=()=>{C.aviso=$('#av').value.trim();save();admin('Aviso salvo.')};
-  $('#prs').onclick=()=>{C.lock=+$('#lk').value;C.dup=$('#dp').checked;C.dark=$('#dk').checked;save();applyTheme();admin('Preferências salvas.')};
+  $('#lk').onchange=()=>{$('#lkw').style.display=$('#lk').value==='x'?'':'none'};
+  $('#prs').onclick=()=>{
+    let lk=+$('#lk').value;
+    if($('#lk').value==='x'){lk=Math.round(+$('#lkc').value);if(!(lk>=5&&lk<=3600))return alert('Digite um tempo entre 5 e 3600 segundos.')}
+    C.lock=lk;C.dup=$('#dp').checked;C.dark=$('#dk').checked;save();applyTheme();admin('Preferências salvas.')};
   app.querySelectorAll('[data-rs]').forEach(b=>b.onclick=()=>{const s=sn[+b.dataset.rs];
     if(!confirm('Restaurar a versão de '+brDate(s.d)+'? Os dados atuais serão substituídos (uma cópia fica guardada).'))return;
     try{localStorage.setItem('ponto_pre',JSON.stringify(S));localStorage.setItem('ponto_dirty','1');localStorage.setItem('ponto_v1',s.data.replace(/\}$/,',"_mod":'+Date.now()+'}'));location.reload()}catch(x){alert('Não foi possível restaurar.')}});
