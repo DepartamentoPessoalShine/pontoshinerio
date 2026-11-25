@@ -715,10 +715,19 @@ function ajuste(){
   <div class="row" style="align-items:flex-start"><div class="sp"><label style="margin-top:0">Funcionário</label><select id="ae">${S.employees.map(e=>`<option value="${e.id}" ${e.id===aEmp?'selected':''}>${esc(e.name)}</option>`).join('')}</select></div>
   <div class="sp"><label style="margin-top:0">Data</label><input type="date" id="ad" value="${aDay}" max="${dkey(new Date())}"></div></div>
   <p style="color:var(--mut);font-size:13px;margin:10px 0"><span class="tag">${TIPOEMP[emp.tipo]}</span> ${hasLunch(emp)?'Bate almoço.':'<b>Não bate almoço</b>.'} Preencha em ordem: ${hasLunch(emp)?'entrada, saída p/ almoço, volta do almoço e saída (a partir da 5ª, entradas/saídas extras)':'entrada e saída (a partir da 3ª, entradas/saídas extras)'}. Apague um horário para removê-lo. Ao salvar, as marcações do dia ficam exatamente como estão abaixo.</p>
-  <div class="sched" style="grid-template-columns:repeat(2,1fr)">${Array.from({length:n},(_,i)=>`<div>${TIPOS[punchType(i,emp)]}<input type="time" class="at" value="${vals[i]||''}"></div>`).join('')}</div>
-  <div class="row" style="margin-top:10px"><button class="btn" id="amais">+ marcação extra</button><button class="btn p" id="asv">Salvar marcações do dia</button></div></div>`);
+  <div class="sched" style="grid-template-columns:repeat(2,1fr)">${Array.from({length:n},(_,i)=>`<div>${TIPOS[punchType(i,emp)]}<input type="time" class="at" value="${vals[i]||''}">${vals[i]?'<button type="button" class="btn d arm" style="margin-top:6px;padding:4px 10px;font-size:12px">Remover</button>':''}</div>`).join('')}</div>
+  <div class="row" style="margin-top:10px"><button class="btn" id="amais">+ marcação extra</button><button class="btn p" id="asv">Salvar marcações do dia</button><button class="btn d" id="adel">🗑 Apagar todas do dia</button></div></div>`);
   $('#ae').onchange=ev=>{aEmp=hEmp=ev.target.value;aN=0;aTmp=null;paneAjuste()};
   $('#ad').onchange=ev=>{if(ev.target.value){aDay=ev.target.value;aN=0;aTmp=null;paneAjuste()}};
+  app.querySelectorAll('.arm').forEach(b=>b.onclick=()=>{
+    if(!confirm('Remover esta marcação de '+emp.name+' em '+brDate(aDay)+'?'))return;
+    const ins=[...app.querySelectorAll('.at')],v=ins.map(i=>i.value);v.splice(ins.indexOf(b.parentNode.querySelector('.at')),1);v.push('');
+    ins.forEach((i,k)=>i.value=v[k]);$('#asv').click()});
+  $('#adel').onclick=()=>{
+    if(!recsOf(aEmp,aDay).length)return alert('Não há marcações neste dia.');
+    if(!confirm('Apagar TODAS as marcações de '+emp.name+' em '+brDate(aDay)+'? Não dá para desfazer.'))return;
+    S.records[aEmp]=(S.records[aEmp]||[]).filter(r=>dkey(new Date(r.ts))!==aDay);
+    save();hMes=aDay.slice(0,7);hEmp=aEmp;aN=0;aTmp=null;admin('Marcações do dia apagadas.')};
   $('#amais').onclick=()=>{aTmp=[...app.querySelectorAll('.at')].map(i=>i.value);aN=n+2;paneAjuste()};
   $('#asv').onclick=()=>{
     if(!aDay||aDay>dkey(new Date()))return alert('Escolha uma data até hoje.');
