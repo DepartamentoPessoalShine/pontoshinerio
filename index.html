@@ -174,7 +174,7 @@ S.employees.forEach(e=>{
   if(!e.week){e.week={};for(let d=0;d<7;d++)e.week[d]=(d>=1&&d<=5)?Object.assign(blank(),e.sched||{}):blank();delete e.sched}
   for(let d=0;d<7;d++)e.week[d]=Object.assign(blank(),e.week[d]||{});
 });
-const save=()=>{try{localStorage.setItem('ponto_v1',JSON.stringify(S))}catch(e){}};
+const save=()=>{S._mod=Date.now();try{localStorage.setItem('ponto_v1',JSON.stringify(S))}catch(e){}window.__syncDirty&&window.__syncDirty()};
 const $=s=>document.querySelector(s);
 const app=$('#app');
 const pad=n=>String(n).padStart(2,'0');
@@ -548,6 +548,7 @@ function exportCSV(){
 
 function paneSeg(){
   $('#pane').innerHTML=`<div class="card"><h2>Segurança</h2><button class="btn" id="apin">Alterar PIN do administrador</button></div><div class="card"><h2>Backup / nuvem</h2><p style="color:var(--mut);font-size:13px;margin-bottom:6px">Os dados ficam só neste navegador. Gere o backup e guarde na nuvem (Google Drive, OneDrive, Dropbox, e-mail ou WhatsApp). O arquivo inclui funcionários, PINs, marcações, ocorrências e feriados.</p><p style="margin-bottom:10px"><b>Último backup:</b> ${S.lastBackup?new Date(S.lastBackup).toLocaleString('pt-BR'):'<span class="neg">nunca feito</span>'}</p><div class="row"><button class="btn p" id="bks">☁ Enviar para a nuvem (compartilhar)</button><button class="btn p" id="bkx">⬇ Baixar arquivo</button><button class="btn" id="bkd">📁 Salvar em pasta (ex.: pasta do Drive)</button></div><details open><summary>Restaurar</summary><div class="row" style="margin-top:8px"><button class="btn" id="bki">⬆ Restaurar backup</button><input type="file" id="bkf" accept=".json,.txt,application/json,text/plain" style="display:none"></div></details><p style="color:var(--mut);font-size:13px;margin-top:10px"><b>Enviar para a nuvem</b> abre o menu de compartilhamento do aparelho (celular e alguns navegadores): escolha Drive, OneDrive, e-mail etc. No computador, use <b>Baixar arquivo</b> e arraste para a pasta/site da nuvem, ou <b>Salvar em pasta</b> escolhendo a pasta sincronizada do Drive/OneDrive/Dropbox (Chrome/Edge).</p></div>`;
+  window.syncUI&&syncUI();
   const bkName=()=>{const n=new Date();return `backup_ponto_${dkey(n)}_${pad(n.getHours())}-${pad(n.getMinutes())}.json`};
   const bkBlob=()=>new Blob([JSON.stringify(Object.assign({},S,{lastBackup:Date.now()}))],{type:'application/json'});
   const feito=()=>{S.lastBackup=Date.now();save();paneSeg()};
@@ -563,7 +564,7 @@ function paneSeg(){
     try{const root=await showDirectoryPicker({mode:'readwrite'}),fh=await root.getFileHandle(bkName(),{create:true}),w=await fh.createWritable();await w.write(bkBlob());await w.close();alert('Backup salvo na pasta escolhida.');feito()}catch(x){if(x.name!=='AbortError')alert('Não foi possível gravar: '+x.message)}
   };
   $('#bki').onclick=()=>$('#bkf').click();
-  $('#bkf').onchange=async ev=>{const f=ev.target.files[0];if(!f)return;try{const o=JSON.parse(await f.text());if(!Array.isArray(o.employees)||typeof o.records!=='object')throw 0;if(!confirm('Substituir TODOS os dados atuais pelo backup?'))return;localStorage.setItem('ponto_v1',JSON.stringify(o));location.reload()}catch(x){alert('Arquivo de backup inválido.')}};
+  $('#bkf').onchange=async ev=>{const f=ev.target.files[0];if(!f)return;try{const o=JSON.parse(await f.text());if(!Array.isArray(o.employees)||typeof o.records!=='object')throw 0;if(!confirm('Substituir TODOS os dados atuais pelo backup?'))return;o._mod=Date.now();localStorage.setItem('ponto_dirty','1');localStorage.setItem('ponto_v1',JSON.stringify(o));location.reload()}catch(x){alert('Arquivo de backup inválido.')}};
   $('#apin').onclick=async()=>{
     const p=await askNewPin('Novo PIN do administrador');
     if(!p)return;
@@ -927,7 +928,7 @@ function paneFerr(){
   $('#prs').onclick=()=>{C.lock=+$('#lk').value;C.dup=$('#dp').checked;C.dark=$('#dk').checked;save();applyTheme();admin('Preferências salvas.')};
   app.querySelectorAll('[data-rs]').forEach(b=>b.onclick=()=>{const s=sn[+b.dataset.rs];
     if(!confirm('Restaurar a versão de '+brDate(s.d)+'? Os dados atuais serão substituídos (uma cópia fica guardada).'))return;
-    try{localStorage.setItem('ponto_pre',JSON.stringify(S));localStorage.setItem('ponto_v1',s.data);location.reload()}catch(x){alert('Não foi possível restaurar.')}});
+    try{localStorage.setItem('ponto_pre',JSON.stringify(S));localStorage.setItem('ponto_dirty','1');localStorage.setItem('ponto_v1',s.data.replace(/\}$/,',"_mod":'+Date.now()+'}'));location.reload()}catch(x){alert('Não foi possível restaurar.')}});
 }
 
 /* ---------- FERIADOS automáticos (nacionais + RJ) ---------- */
@@ -953,6 +954,100 @@ const moveisAno=y=>{const p=easter(y);return[[addD(p,-48),'Carnaval (segunda)'],
     S.holYears.push(y);ch=true;
   });
   if(ch)save();
+})();
+
+/* ---------- SINCRONIZAÇÃO (tablet <-> PC) ---------- */
+(function(){
+  const KEYN='ponto_synckey',REVN='ponto_rev',DN='ponto_dirty';
+  let key=localStorage.getItem(KEYN)||'',rev=+localStorage.getItem(REVN)||0,busy=false,pt=null,st='';
+  let dirty=localStorage.getItem(DN)==='1';
+  const setDirty=v=>{dirty=v;try{v?localStorage.setItem(DN,'1'):localStorage.removeItem(DN)}catch(e){}};
+  const badge=document.createElement('div');
+  badge.style.cssText='position:fixed;right:8px;bottom:8px;font-size:11px;padding:3px 9px;border-radius:12px;background:#fff;border:1px solid var(--bd);color:var(--mut);z-index:5;opacity:.9;pointer-events:none';
+  document.body.appendChild(badge);
+  const paint=t=>{st=t;badge.hidden=!key;badge.textContent=t};
+  const hm=()=>hhmm(new Date());
+  async function api(method,body){
+    const r=await fetch('/api/sync',{method,headers:{'x-sync-key':key,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
+    const j=await r.json().catch(()=>({}));
+    return Object.assign({status:r.status},j);
+  }
+  function adopt(o,r){
+    const keep=C;Object.keys(S).forEach(k=>delete S[k]);Object.assign(S,o);
+    Object.assign(keep,S.cfg||{});S.cfg=keep;
+    S.employees=S.employees||[];S.records=S.records||{};S.occurrences=S.occurrences||[];S.holidays=S.holidays||[];S.holFixed=S.holFixed||[];
+    rev=r;try{localStorage.setItem(REVN,rev);localStorage.setItem('ponto_v1',JSON.stringify(S))}catch(e){}
+  }
+  /* conflito (os dois mudaram ao mesmo tempo): o mais recente vence, mas nenhuma marcação de ponto se perde */
+  function merge(a,b){
+    const w=(a._mod||0)>=(b._mod||0)?a:b,m=JSON.parse(JSON.stringify(w));m.records={};
+    m.employees.forEach(e=>{const u=new Map();
+      [].concat((a.records||{})[e.id]||[],(b.records||{})[e.id]||[]).forEach(r=>u.set(r.ts+':'+r.type,r));
+      m.records[e.id]=[...u.values()].sort((x,y)=>x.ts-y.ts)});
+    return m;
+  }
+  function refresh(){
+    const a=document.activeElement;
+    if((a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName))||document.querySelector('.pin-ov'))return;
+    try{if($('#pane')){if(adminTab==='painel')admin()}else if(document.querySelector('.hello'))home()}catch(e){}
+  }
+  async function run(){
+    if(!key||busy)return;busy=true;
+    try{
+      const g=await api('GET');
+      if(g.status===401){paint('⚠ chave inválida');return}
+      if(g.status!==200)throw 0;
+      let changed=false;
+      if(g.data==null){rev=0}
+      else if(g.rev>rev){
+        if(dirty)adopt(merge(S,g.data),g.rev);else{adopt(g.data,g.rev);setDirty(false)}
+        changed=true;
+      }
+      if(dirty||g.data==null){
+        const mod=S._mod,p=await api('PUT',{baseRev:rev,data:S});
+        if(p.status===200){rev=p.rev;try{localStorage.setItem(REVN,rev)}catch(e){}if(S._mod===mod)setDirty(false)}
+        else{paint('⚠ conflito, tentando de novo');clearTimeout(pt);pt=setTimeout(run,3000);return}
+      }
+      if(changed)refresh();
+      paint('☁ sincronizado '+hm());
+    }catch(e){paint('⚠ sem conexão (dados salvos neste aparelho)')}
+    finally{busy=false}
+  }
+  window.__syncDirty=()=>{if(!key)return;setDirty(true);paint('☁ salvando…');clearTimeout(pt);pt=setTimeout(run,1500)};
+
+  window.syncUI=function(){
+    const pane=$('#pane');if(!pane)return;
+    const c=document.createElement('div');c.className='card';
+    c.innerHTML=`<h2>☁ Sincronização (tablet ⇄ PC)</h2>
+      <p style="color:var(--mut);font-size:13px;margin-bottom:8px">${key?'Ativa neste aparelho. '+esc(st):'Desligada neste aparelho.'} Use a <b>mesma chave</b> em todos os aparelhos.</p>
+      <label style="margin-top:0">Chave de sincronização</label><input id="sk" type="password" autocomplete="off" value="${esc(key)}">
+      <div class="row" style="margin-top:10px"><button class="btn p" id="sks">Salvar e sincronizar</button>${key?'<button class="btn" id="sko">Sincronizar agora</button><button class="btn d" id="skd">Desligar</button>':''}</div>`;
+    pane.appendChild(c);
+    $('#sks').onclick=async()=>{
+      const k=$('#sk').value.trim();if(!k)return;
+      const old=key;key=k;
+      try{
+        const g=await api('GET');
+        if(g.status===401){key=old;return alert('Chave incorreta.')}
+        if(g.status!==200)throw 0;
+        if(g.data!=null&&!(old===k&&rev>0)){
+          if(!confirm('A nuvem já tem dados. Substituir os dados DESTE aparelho pelos da nuvem? (uma cópia fica guardada)')){key=old;return}
+          try{localStorage.setItem('ponto_pre',JSON.stringify(S))}catch(e){}
+          adopt(g.data,g.rev);setDirty(false);localStorage.setItem(KEYN,key);return location.reload();
+        }
+        localStorage.setItem(KEYN,key);setDirty(true);await run();paneSeg();
+      }catch(e){key=old;alert('Não foi possível conectar. Verifique a internet e a configuração do servidor.')}
+    };
+    if($('#sko'))$('#sko').onclick=async()=>{await run();paneSeg()};
+    if($('#skd'))$('#skd').onclick=()=>{if(!confirm('Desligar a sincronização neste aparelho? Os dados locais continuam aqui.'))return;
+      key='';rev=0;localStorage.removeItem(KEYN);localStorage.removeItem(REVN);setDirty(false);paint('');paneSeg()};
+  };
+
+  if(key)paint('☁ conectando…');
+  setInterval(()=>{if(!document.hidden)run()},30000);
+  addEventListener('online',run);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)run()});
+  run();
 })();
 
 applyTheme();home();
