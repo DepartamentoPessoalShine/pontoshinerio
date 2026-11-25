@@ -1,3 +1,5 @@
+// Vercel Serverless Function: guarda o estado do ponto em um Redis (Upstash) e protege com SYNC_KEY.
+// Este arquivo deve ficar em  api/sync.js  na raiz do projeto.
 const crypto = require('crypto');
 
 const URL_ = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
@@ -19,10 +21,15 @@ const same = (a, b) => {
   return x.length === y.length && crypto.timingSafeEqual(x, y);
 };
 
+// o navegador envia a senha codificada (encodeURIComponent) para aceitar acentos
+const decode = (v) => { v = String(v || ''); try { return decodeURIComponent(v); } catch (e) { return v; } };
+
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  if (!process.env.SYNC_KEY || !URL_ || !TOKEN) return res.status(500).json({ error: 'servidor não configurado' });
-  if (!same(req.headers['x-sync-key'], process.env.SYNC_KEY)) return res.status(401).json({ error: 'chave inválida' });
+  const secret = String(process.env.SYNC_KEY || '').trim(); // ignora espaço/quebra de linha colados por engano
+  if (!secret) return res.status(500).json({ error: 'SYNC_KEY não está definida no servidor (Vercel > Settings > Environment Variables).' });
+  if (!URL_ || !TOKEN) return res.status(500).json({ error: 'Banco de dados (Upstash/KV) não está configurado no servidor.' });
+  if (!same(decode(req.headers['x-sync-key']).trim(), secret)) return res.status(401).json({ error: 'chave inválida' });
 
   try {
     const [{ result }] = await redis([['GET', KEY]]);
@@ -36,7 +43,7 @@ module.exports = async (req, res) => {
       if (baseRev !== cur.rev) return res.status(409).json(cur);
       const next = { rev: cur.rev + 1, data };
       const cmds = [['SET', KEY, JSON.stringify(next)]];
-      if (result) cmds.unshift(['SET', 'ponto:prev', result]);
+      if (result) cmds.unshift(['SET', 'ponto:prev', result]); // guarda a versão anterior
       await redis(cmds);
       return res.status(200).json({ rev: next.rev });
     }
