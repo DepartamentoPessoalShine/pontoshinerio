@@ -150,21 +150,34 @@ body.pin-lock{overflow:hidden}
 <script>
 /* ---------- TELA DE SENHA DO SITE (a senha é a mesma SYNC_KEY, conferida no servidor) ---------- */
 (function(){
-  try{if(localStorage.getItem('ponto_synckey'))return}catch(e){}
+  const KN='ponto_synckey';
+  let saved='';try{saved=localStorage.getItem(KN)||''}catch(e){}
+  /* cabeçalhos HTTP só aceitam ASCII: codifica para que senhas com acento/ç funcionem */
+  const check=v=>fetch('/api/sync',{headers:{'x-sync-key':encodeURIComponent(v)},cache:'no-store'});
+  if(saved){
+    /* este aparelho já tem senha: confere em segundo plano; se o servidor disser que mudou, volta a pedir */
+    check(saved).then(r=>{if(r.status===401){try{localStorage.removeItem(KN)}catch(e){}location.reload()}}).catch(()=>{});
+    return;
+  }
   const o=document.createElement('div');
   o.style.cssText='position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(115deg,#2fd0b5 0%,#3cc4c9 50%,#45b5df 100%);font-family:Nunito,"Segoe UI",system-ui,sans-serif';
-  o.innerHTML='<form style="background:#fff;border-radius:20px;padding:26px;width:100%;max-width:340px;text-align:center;box-shadow:0 10px 28px rgba(20,150,165,.25)"><h2 style="color:#06626f;margin:0 0 4px;font-size:20px">Ponto Eletrônico</h2><p style="color:#56727a;font-size:14px;margin:0 0 14px">Shine Rio Group · digite a senha de acesso</p><input type="password" autocomplete="current-password" placeholder="Senha" style="width:100%;padding:12px;border:1px solid #d5ecec;border-radius:12px;font-size:16px"><p style="color:#b00020;font-size:13px;min-height:18px;margin:8px 0"></p><button style="width:100%;padding:13px;border:0;border-radius:30px;background:#087c8c;color:#fff;font-size:16px;font-weight:700;cursor:pointer">Entrar</button></form>';
+  o.innerHTML='<form style="background:#fff;border-radius:20px;padding:26px;width:100%;max-width:340px;text-align:center;box-shadow:0 10px 28px rgba(20,150,165,.25)"><h2 style="color:#06626f;margin:0 0 4px;font-size:20px">Ponto Eletrônico</h2><p style="color:#56727a;font-size:14px;margin:0 0 14px">Shine Rio Group · digite a senha de acesso</p><input type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Senha" style="width:100%;padding:12px;border:1px solid #d5ecec;border-radius:12px;font-size:16px"><p style="color:#b00020;font-size:13px;min-height:18px;margin:8px 0"></p><button style="width:100%;padding:13px;border:0;border-radius:30px;background:#087c8c;color:#fff;font-size:16px;font-weight:700;cursor:pointer">Entrar</button></form>';
   document.body.appendChild(o);
-  const f=o.querySelector('form'),i=f.querySelector('input'),er=f.querySelector('p:nth-of-type(2)');
+  const f=o.querySelector('form'),i=f.querySelector('input'),er=f.querySelector('p:nth-of-type(2)'),bt=f.querySelector('button');
   setTimeout(()=>i.focus(),50);
   f.onsubmit=async ev=>{
-    ev.preventDefault();const v=i.value.trim();if(!v)return;er.textContent='Verificando…';
+    ev.preventDefault();const v=i.value.trim();if(!v)return;er.textContent='Verificando…';bt.disabled=true;
     try{
-      const r=await fetch('/api/sync',{headers:{'x-sync-key':v}});
-      if(r.status===200){localStorage.setItem('ponto_synckey',v);location.reload()}
-      else if(r.status===401)er.textContent='Senha incorreta.';
-      else er.textContent='Não foi possível verificar. Tente de novo.';
+      const r=await check(v);
+      const j=await r.json().catch(()=>null);
+      if(r.status===200&&j&&typeof j==='object'&&'rev' in j){try{localStorage.setItem(KN,v)}catch(e){er.textContent='O navegador bloqueou o armazenamento (modo privado?).';return}location.reload();return}
+      if(r.status===401)er.textContent='Senha incorreta.';
+      else if(r.status===404||r.status===200)er.textContent='O servidor não tem a rota /api/sync (o arquivo deve ficar em api/sync.js).';
+      else if(r.status===500)er.textContent=(j&&j.error)||'Servidor não configurado (variáveis SYNC_KEY e banco).';
+      else if(r.status===502)er.textContent='O servidor não conseguiu acessar o banco de dados.';
+      else er.textContent='Não foi possível verificar (erro '+r.status+').';
     }catch(x){er.textContent='Sem conexão com a internet.'}
+    finally{bt.disabled=false}
   };
 })();
 </script>
@@ -999,7 +1012,7 @@ const moveisAno=y=>{const p=easter(y);return[[addD(p,-48),'Carnaval (segunda)'],
   const paint=t=>{st=t;badge.hidden=!key;badge.textContent=t};
   const hm=()=>hhmm(new Date());
   async function api(method,body){
-    const r=await fetch('/api/sync',{method,headers:{'x-sync-key':key,'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
+    const r=await fetch('/api/sync',{method,headers:{'x-sync-key':encodeURIComponent(key),'content-type':'application/json'},body:body?JSON.stringify(body):undefined});
     const j=await r.json().catch(()=>({}));
     return Object.assign({status:r.status},j);
   }
